@@ -1,6 +1,20 @@
 # M3Cord
 Material 3 Expressive Discord client (Kotlin + Compose).
 
+## Screenshots
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/servers.jpg" width="250" alt="Servers and channels"></td>
+    <td align="center"><img src="screenshots/profile.jpg" width="250" alt="Profile and theme settings"></td>
+    <td align="center"><img src="screenshots/chat.jpg" width="250" alt="Chat"></td>
+  </tr>
+  <tr>
+    <td align="center">Servers &amp; channels</td>
+    <td align="center">Profile &amp; theme</td>
+    <td align="center">Chat</td>
+  </tr>
+</table>
+
 Build (needs JDK 17 + Android SDK 35):
 1. `gradle wrapper --gradle-version 8.9`  (no wrapper jar included)
 2. `./gradlew assembleDebug`
