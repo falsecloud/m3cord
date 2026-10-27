@@ -71,7 +71,7 @@ object Notifier {
     fun foregroundNotification(ctx: Context): Notification =
         NotificationCompat.Builder(ctx, CH_BG)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("M3Cord")
+            .setContentTitle("M3w")
             .setContentText("Listening for messages")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)

@@ -76,7 +76,7 @@ fun LoginScreen(vm: MainViewModel) {
         Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(28.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("M3Cord", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, modifier = Modifier.enter(0))
+        Text("M3w", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, modifier = Modifier.enter(0))
         Spacer(Modifier.height(8.dp))
         Text("paste your account token to jump in", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.enter(1))
         Spacer(Modifier.height(28.dp))
