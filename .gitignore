@@ -1,0 +1,36 @@
+# Gradle / Kotlin build output
+.gradle/
+.kotlin/
+build/
+/app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Machine-specific (contains your local SDK path)
+local.properties
+
+# Built artifacts (APKs go in GitHub Releases, not the repo)
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing
+*.jks
+*.keystore
+keystore.properties
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.cursor/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+hs_err_pid*
