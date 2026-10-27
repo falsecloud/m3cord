@@ -385,7 +385,9 @@ fun DmList(vm: MainViewModel) {
 
 @Composable
 fun FriendList(vm: MainViewModel) {
+    val active = vm.activeFriends()
     LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (active.isNotEmpty()) item(key = "active-now") { ActiveNow(vm, active) }
         itemsIndexed(vm.friends, key = { _, f -> f.id }) { i, f ->
             PersonRow(f.avatar, f.name, i, status = vm.presence[f.id], trailing = {
                 if (f.type == 3) Text("Pending", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)

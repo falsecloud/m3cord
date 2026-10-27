@@ -79,6 +79,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- gateway / live state ----
     val presence = mutableStateMapOf<String, String>()
+    val activities = mutableStateMapOf<String, List<Activity>>()
+    val appIcons = mutableStateMapOf<String, String>()
+    private val iconLoading = HashSet<String>()
     val typing = mutableStateMapOf<String, Map<String, Pair<String, Long>>>()
     private var gwJob: Job? = null
     private var lastTyping = 0L
@@ -96,6 +99,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         GatewayHub.start(t, status)
         gwConnected = GatewayHub.connected
         GatewayHub.presence.forEach { (k, v) -> presence[k] = v }
+        GatewayHub.activities.forEach { (k, v) -> activities[k] = v }
         if (gwJob == null) gwJob = viewModelScope.launch { GatewayHub.events.collect { handle(it) } }
     }
 
@@ -105,7 +109,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 gwConnected = e.connected
                 if (e.connected) { if (open != null) refresh(); loadDms() }
             }
-            is GwPresence -> presence[e.userId] = e.status
+            is GwPresence -> {
+                presence[e.userId] = e.status
+                if (e.activities.isEmpty()) activities.remove(e.userId) else activities[e.userId] = e.activities
+            }
             is GwCreated -> onCreated(e)
             is GwUpdated -> if (open?.id == e.channelId) {
                 messages = messages.map { if (it.id == e.msg.id) e.msg.copy(reactions = it.reactions) else it }
@@ -409,6 +416,127 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- active now ----
+
+    /** Friends who are currently doing something (playing, listening, streaming...), paired with that activity. */
+    fun activeFriends(): List<Pair<Friend, Activity>> =
+        friends.filter { it.type == 1 }.mapNotNull { f -> activities[f.id]?.firstOrNull()?.let { f to it } }
+
+    /** Games often send no artwork, so fall back to the application's icon. */
+    fun resolveAppIcon(appId: String) {
+        if (appIcons.containsKey(appId) || !iconLoading.add(appId)) return
+        viewModelScope.launch {
+            val url = try { io { api?.appIcon(appId) } } catch (e: Exception) { null }
+            appIcons[appId] = url ?: ""
+        }
+    }
+
+    // ---- emoji / GIF picker ----
+
+    var emojiPacks by mutableStateOf<List<EmojiPack>>(emptyList()); private set
+    var emojiLoading by mutableStateOf(false); private set
+    private var emojisRequested = false
+    var favGifs by mutableStateOf<List<FavGif>>(emptyList()); private set
+    var favReady by mutableStateOf(false); private set
+    var favError by mutableStateOf(false); private set
+    private var favLoading = false
+    var gifResults by mutableStateOf<List<FavGif>>(emptyList()); private set
+    var gifLoading by mutableStateOf(false); private set
+    var gifError by mutableStateOf<String?>(null); private set
+    private var gifJob: Job? = null
+
+    /** Custom emojis from every server you're in, loaded one server at a time so the picker fills in as it goes. */
+    fun loadEmojis() {
+        if (emojisRequested || guilds.isEmpty()) return
+        emojisRequested = true
+        emojiLoading = true
+        val gs = guilds
+        viewModelScope.launch {
+            for (g in gs) {
+                try {
+                    val list = io { api!!.guildEmojis(g.id) }
+                    if (list.isNotEmpty()) emojiPacks = emojiPacks + EmojiPack(g.id, g.name, g.icon, list)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // one server failing (rate limit, no access) shouldn't stop the rest
+                }
+                delay(120)
+            }
+            emojiLoading = false
+        }
+    }
+
+    /** Text to put in the message box for a custom emoji. Nitro (or an own-server static emoji) sends the real emoji, otherwise the image link like the official app. */
+    fun emojiText(e: CustomEmoji): String {
+        val inGuild = open?.let { it.type != 1 && it.type != 3 } == true
+        val usable = me?.nitro == true || (inGuild && !e.animated && e.guildId == selected)
+        return if (usable) "<" + (if (e.animated) "a" else "") + ":" + e.name + ":" + e.id + "> "
+        else "https://cdn.discordapp.com/emojis/" + e.id + ".webp?size=48&name=" + e.name + (if (e.animated) "&animated=true" else "") + " "
+    }
+
+    fun loadFavGifs(force: Boolean = false) {
+        if (favLoading || (favReady && !force)) return
+        favLoading = true
+        favError = false
+        viewModelScope.launch {
+            try {
+                favGifs = io { api!!.favGifs() }
+                favReady = true
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                favError = true
+            }
+            favLoading = false
+        }
+    }
+
+    fun isFav(url: String): Boolean = favGifs.any { it.url == url }
+
+    /** Adds/removes a favorite and syncs it to the account. Refuses until the existing favorites have loaded, so we never overwrite them. */
+    fun toggleFavGif(g: FavGif) {
+        if (!favReady) {
+            error = "Your favorites are still loading, try again in a sec"
+            loadFavGifs()
+            return
+        }
+        val before = favGifs
+        val next = if (before.any { it.url == g.url }) before.filter { it.url != g.url }
+        else listOf(g.copy(order = (before.maxOfOrNull { it.order } ?: 0) + 1)) + before
+        favGifs = next
+        viewModelScope.launch {
+            try {
+                io { api!!.saveFavGifs(next) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                favGifs = before
+                error = "Couldn't update favorites (" + e.message + ")"
+            }
+        }
+    }
+
+    /** Blank [q] = trending. Debounced so typing doesn't hammer the search endpoint. */
+    fun searchGifs(q: String) {
+        gifJob?.cancel()
+        gifJob = viewModelScope.launch {
+            gifLoading = true
+            gifError = null
+            if (q.isNotBlank()) delay(350)
+            try {
+                gifResults = io { api!!.gifs(q.trim().ifBlank { null }) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                gifError = "Couldn't load GIFs"
+            }
+            gifLoading = false
+        }
+    }
+
+    fun sendGif(g: FavGif) = send(g.url, emptyList())
+
     fun loadFriends() {
         viewModelScope.launch {
             try { friends = io { api!!.friends() } } catch (e: Exception) { fail(e) }
@@ -506,6 +634,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         gwJob = null
         gwConnected = false
         UnreadStore.reset(); presence.clear(); typing.clear()
+        activities.clear(); appIcons.clear(); iconLoading.clear()
+        emojiPacks = emptyList(); emojisRequested = false; emojiLoading = false
+        favGifs = emptyList(); favReady = false; favLoading = false; favError = false
+        gifResults = emptyList(); gifJob?.cancel()
         api = null
         me = null
         myProfile = null

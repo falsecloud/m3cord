@@ -28,7 +28,7 @@ data class GwUpdated(val msg: Msg, val channelId: String) : Gw
 data class GwEmbeds(val channelId: String, val msgId: String, val embeds: List<Emb>) : Gw
 data class GwDeleted(val channelId: String, val id: String) : Gw
 data class GwTyping(val channelId: String, val userId: String, val name: String?) : Gw
-data class GwPresence(val userId: String, val status: String) : Gw
+data class GwPresence(val userId: String, val status: String, val activities: List<Activity> = emptyList()) : Gw
 data class GwReaction(
     val channelId: String, val msgId: String, val userId: String, val key: String,
     val label: String, val url: String?, val add: Boolean
@@ -42,6 +42,7 @@ object GatewayHub {
     private val _events = MutableSharedFlow<Gw>(extraBufferCapacity = 512, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val events: SharedFlow<Gw> = _events.asSharedFlow()
     val presence = ConcurrentHashMap<String, String>()
+    val activities = ConcurrentHashMap<String, List<Activity>>()
     private val channels = ConcurrentHashMap<String, Channel>()
 
     @Volatile var connected = false
@@ -78,6 +79,7 @@ object GatewayHub {
         token = null
         api = null
         presence.clear()
+        activities.clear()
         channels.clear()
     }
 
@@ -197,9 +199,10 @@ object GatewayHub {
         )
     }
 
-    private fun setPresence(id: String, st: String) {
+    private fun setPresence(id: String, st: String, acts: List<Activity> = emptyList()) {
         presence[id] = st
-        _events.tryEmit(GwPresence(id, st))
+        if (acts.isEmpty()) activities.remove(id) else activities[id] = acts
+        _events.tryEmit(GwPresence(id, st, acts))
     }
 
     private fun presences(arr: JSONArray?) {
@@ -207,7 +210,7 @@ object GatewayHub {
         for (i in 0 until arr.length()) {
             val p = arr.optJSONObject(i) ?: continue
             val id = p.optJSONObject("user")?.str("id") ?: p.str("user_id") ?: continue
-            setPresence(id, p.str("status") ?: continue)
+            setPresence(id, p.str("status") ?: continue, parseActivities(p.optJSONArray("activities")))
         }
     }
 
@@ -228,7 +231,7 @@ object GatewayHub {
             "READY_SUPPLEMENTAL" -> presences(d.optJSONObject("merged_presences")?.optJSONArray("friends"))
             "PRESENCE_UPDATE" -> {
                 val id = d.optJSONObject("user")?.str("id") ?: return
-                setPresence(id, d.str("status") ?: return)
+                setPresence(id, d.str("status") ?: return, parseActivities(d.optJSONArray("activities")))
             }
             "MESSAGE_CREATE" -> {
                 val msg = parser.parseMessage(d)

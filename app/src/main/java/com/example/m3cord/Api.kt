@@ -16,7 +16,7 @@ data class Channel(
     val id: String, val name: String, val type: Int, val parentId: String?, val position: Int,
     val icon: String? = null, val recipientId: String? = null, val topic: String? = null
 )
-data class Me(val id: String, val username: String, val name: String, val avatar: String?)
+data class Me(val id: String, val username: String, val name: String, val avatar: String?, val nitro: Boolean = false)
 data class Att(val url: String, val name: String, val mime: String, val size: Long, val w: Int, val h: Int, val waveform: String? = null, val secs: Float = 0f)
 data class Emb(
     val type: String, val url: String?, val title: String?, val desc: String?, val color: Int?,
@@ -100,7 +100,7 @@ class DiscordApi(private val token: String) {
         val id = o.getString("id")
         myId = id
         val un = o.optString("username")
-        return Me(id, un, o.str("global_name") ?: un, avatarUrl(id, o.str("avatar"), 128))
+        return Me(id, un, o.str("global_name") ?: un, avatarUrl(id, o.str("avatar"), 128), o.optInt("premium_type", 0) > 0)
     }
 
     fun guilds(): List<Guild> =
@@ -147,6 +147,39 @@ class DiscordApi(private val token: String) {
             u.str("banner")?.let { "https://cdn.discordapp.com/banners/$id/${it}.png?size=480" },
             u.optInt("accent_color", -1).takeIf { it >= 0 }, bio ?: u.str("bio") ?: "", pronouns ?: "", snowflakeMs(id)
         )
+    }
+
+    // ---- emojis, GIFs, favorites, app icons ----
+
+    fun guildEmojis(gid: String): List<CustomEmoji> {
+        val arr = JSONArray(call("/guilds/$gid/emojis"))
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { it.optBoolean("available", true) }
+            .map { CustomEmoji(it.getString("id"), it.optString("name"), it.optBoolean("animated"), gid) }
+    }
+
+    /** Trending when [q] is blank, search otherwise. Tiny GIFs for the grid, full GIF kept as the stored src. */
+    fun gifs(q: String?): List<FavGif> {
+        val path = if (q.isNullOrBlank()) "/gifs/trending-gifs?media_format=tinygif&locale=en-US&limit=48"
+        else "/gifs/search?q=" + java.net.URLEncoder.encode(q, "UTF-8") + "&media_format=tinygif&locale=en-US&limit=48"
+        return JSONArray(call(path)).mapObj {
+            FavGif(
+                url = it.getString("url"), src = it.str("gif_src") ?: it.getString("src"),
+                w = it.optInt("width"), h = it.optInt("height"), video = false, thumb = it.str("src")
+            )
+        }
+    }
+
+    /** Favorite GIFs live in the account's FrecencyUserSettings proto (type 2). */
+    fun favGifs(): List<FavGif> = FavGifProto.decode(JSONObject(call("/users/@me/settings-proto/2")).optString("settings"))
+
+    fun saveFavGifs(list: List<FavGif>) {
+        call("/users/@me/settings-proto/2", "PATCH", JSONObject().put("settings", FavGifProto.encode(list)))
+    }
+
+    fun appIcon(appId: String): String? {
+        val icon = JSONObject(call("/applications/$appId/rpc")).str("icon") ?: return null
+        return "https://cdn.discordapp.com/app-icons/" + appId + "/" + icon + ".png?size=256"
     }
 
     fun patchMe(json: JSONObject) { call("/users/@me", "PATCH", json) }

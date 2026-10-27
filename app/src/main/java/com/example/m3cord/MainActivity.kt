@@ -58,6 +58,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.decode.VideoFrameDecoder
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
         Coil.setImageLoader(
             ImageLoader.Builder(this).components {
                 if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
+                add(VideoFrameDecoder.Factory())
             }.crossfade(true).build()
         )
         // ask for notification permission on the very first launch

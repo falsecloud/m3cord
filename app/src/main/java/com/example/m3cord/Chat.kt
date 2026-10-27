@@ -10,7 +10,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -222,6 +229,11 @@ fun ChatScreen(vm: MainViewModel, ch: Channel) {
 fun InputBar(vm: MainViewModel, ch: Channel) {
     var text by remember { mutableStateOf("") }
     var picks by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var panel by remember { mutableStateOf(false) }
+    val fieldFocus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    BackHandler(enabled = panel) { panel = false }
     val mentionMap = remember { mutableStateMapOf<String, String>() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) {
         picks = (picks + it).distinct().take(10)
@@ -354,8 +366,20 @@ fun InputBar(vm: MainViewModel, ch: Channel) {
                 placeholder = { Text(if (ch.type == 0 || ch.type == 5) "Message #${ch.name}" else "Message ${ch.name}", maxLines = 1) },
                 shape = RoundedCornerShape(28.dp), maxLines = 4,
                 colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
-                modifier = Modifier.weight(1f).animateContentSize()
+                modifier = Modifier.weight(1f).animateContentSize().focusRequester(fieldFocus)
+                    .onFocusChanged { if (it.isFocused) panel = false }
             )
+            XIconButton(onClick = {
+                if (panel) { panel = false; fieldFocus.requestFocus() }
+                else { focusManager.clearFocus(); keyboard?.hide(); panel = true }
+            }) {
+                AnimatedContent(
+                    targetState = panel, label = "emojiicon",
+                    transitionSpec = { (scaleIn(bounce(0.45f, 500f)) + fadeIn()) togetherWith (scaleOut() + fadeOut()) }
+                ) { isOpen ->
+                    if (isOpen) Icon(Icons.Filled.Keyboard, "Back to keyboard") else Icon(Icons.Filled.EmojiEmotions, "Emojis and GIFs")
+                }
+            }
             AnimatedVisibility(
                 visible = text.isNotBlank() || picks.isNotEmpty(),
                 enter = scaleIn(bounce(0.5f, 400f)) + fadeIn() + expandHorizontally(),
@@ -389,6 +413,16 @@ fun InputBar(vm: MainViewModel, ch: Channel) {
                     Icon(Icons.Filled.Mic, "Record voice message")
                 }
             }
+        }
+        AnimatedVisibility(
+            visible = panel && !recording,
+            enter = expandVertically(spring(0.75f, 380f)) + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            EmojiPanel(
+                vm, onEmoji = { text += it },
+                onGif = { g -> vm.sendGif(g); panel = false }
+            )
         }
     }
 }
@@ -643,7 +677,16 @@ fun MessageActionSheet(m: Msg, vm: MainViewModel) {
                 ActionRow(Icons.Filled.Edit, "Edit message", 3) { vm.editMsg = m; vm.replyTo = null; close() }
                 ActionRow(Icons.Filled.Delete, "Delete message", 4, danger = true) { vm.deleteMessage(m); close() }
             }
-            ActionRow(Icons.Filled.Person, "View profile", 5) { close(); vm.showProfile(m.authorId) }
+            val gif = remember(m.id) { gifOf(m) }
+            if (gif != null) {
+                LaunchedEffect(Unit) { vm.loadFavGifs() }
+                val fav = vm.isFav(gif.url)
+                ActionRow(
+                    if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    if (fav) "Remove GIF from favorites" else "Favorite this GIF", 5
+                ) { vm.toggleFavGif(gif); close() }
+            }
+            ActionRow(Icons.Filled.Person, "View profile", 6) { close(); vm.showProfile(m.authorId) }
         }
     }
 }

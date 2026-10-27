@@ -3,6 +3,7 @@ No new dependencies since v3 (androidx.core comes in transitively through activi
 Needed in app/build.gradle.kts, keep versions that already work:
 implementation("androidx.compose.material:material-icons-extended")
 implementation("io.coil-kt:coil-gif:2.7.0")
+implementation("io.coil-kt:coil-video:2.7.0")   // NEW: still frames for video-format favorite GIFs
 implementation("androidx.media3:media3-exoplayer:1.4.1")
 implementation("androidx.media3:media3-ui:1.4.1")
 implementation("com.squareup.okhttp3:okhttp:4.12.0")
