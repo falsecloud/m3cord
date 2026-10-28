@@ -149,6 +149,49 @@ class DiscordApi(private val token: String) {
         )
     }
 
+    // ---- messages preview + discord account settings ----
+
+    fun lastMessage(cid: String): Msg? =
+        JSONArray(call("/channels/$cid/messages?limit=1")).mapObj { parseMsg(it) }.firstOrNull()
+
+    fun getSettings(): Map<String, Any?> {
+        val o = JSONObject(call("/users/@me/settings"))
+        val out = HashMap<String, Any?>()
+        o.keys().forEach { k -> out[k] = o.opt(k).takeIf { it != JSONObject.NULL } }
+        return out
+    }
+
+    fun patchSettings(json: JSONObject) { call("/users/@me/settings", "PATCH", json) }
+
+    fun account(): Account {
+        val o = JSONObject(call("/users/@me"))
+        return Account(o.str("email"), o.str("phone"), o.optBoolean("verified"), o.optBoolean("mfa_enabled"), o.optInt("premium_type", 0) > 0)
+    }
+
+    fun connections(): List<InfoRow> =
+        JSONArray(call("/users/@me/connections")).mapObj {
+            InfoRow(it.optString("name"), it.optString("type").replaceFirstChar { c -> c.uppercase() } + (if (it.optBoolean("verified")) " · verified" else ""))
+        }
+
+    fun sessions(): List<InfoRow> {
+        val arr = JSONObject(call("/auth/sessions")).optJSONArray("user_sessions") ?: return emptyList()
+        return arr.mapObj { s ->
+            val ci = s.optJSONObject("client_info")
+            InfoRow(
+                (ci?.optString("platform") ?: "Unknown") + " · " + (ci?.optString("os") ?: ""),
+                (ci?.optString("location") ?: "") + " · last used " + s.optString("approx_last_used_time").take(10)
+            )
+        }
+    }
+
+    fun authorizedApps(): List<InfoRow> =
+        JSONArray(call("/oauth2/tokens")).mapObj {
+            InfoRow(
+                it.optJSONObject("application")?.optString("name") ?: "App",
+                it.optJSONArray("scopes")?.let { a -> (0 until a.length()).joinToString(", ") { i -> a.getString(i) } } ?: ""
+            )
+        }
+
     // ---- emojis, GIFs, favorites, app icons ----
 
     fun guildEmojis(gid: String): List<CustomEmoji> {
@@ -356,3 +399,7 @@ class DiscordApi(private val token: String) {
         )
     }
 }
+
+data class Account(val email: String?, val phone: String?, val verified: Boolean, val mfa: Boolean, val nitro: Boolean)
+data class InfoRow(val title: String, val sub: String)
+data class DmPreview(val text: String, val mine: Boolean)

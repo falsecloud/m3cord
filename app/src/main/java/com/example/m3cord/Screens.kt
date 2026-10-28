@@ -12,7 +12,13 @@ import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -113,13 +119,23 @@ fun MainScreen(vm: MainViewModel) {
     val conn = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -10f) dockVisible = false else if (available.y > 10f) dockVisible = true
+                if (vm.dockAutoHide) {
+                    if (available.y < -10f) dockVisible = false else if (available.y > 10f) dockVisible = true
+                }
                 return Offset.Zero
             }
         }
     }
-    LaunchedEffect(vm.tab) { dockVisible = true }
+    LaunchedEffect(vm.tab, vm.dockAutoHide) { dockVisible = true }
     val hide by animateFloatAsState(if (dockVisible) 0f else 1f, bounce(0.75f, 450f), label = "dock")
+
+    var menuOpen by remember { mutableStateOf(false) }
+    val menuP = remember { Animatable(0f) }
+    var btnCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var btnRect by remember { mutableStateOf(Rect.Zero) }
+    LaunchedEffect(menuOpen) { menuP.animateTo(if (menuOpen) 1f else 0f, bounce(0.92f, 280f)) }
+    BackHandler(enabled = menuOpen) { menuOpen = false }
+
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
         AnimatedContent(
             targetState = vm.tab,
@@ -137,13 +153,24 @@ fun MainScreen(vm: MainViewModel) {
                 else -> YouTab(vm)
             }
         }
-        PillNav(
-            vm,
+        Row(
             Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 14.dp).graphicsLayer {
                 translationY = hide * (size.height + 90.dp.toPx())
                 alpha = 1f - hide * 0.5f
-            }
-        )
+            },
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
+        ) {
+            PillNav(vm, Modifier.graphicsLayer { alpha = 1f - menuP.value.coerceIn(0f, 1f) })
+            MewButton(
+                onClick = {
+                    btnRect = btnCoords?.boundsInWindow() ?: btnRect
+                    dockVisible = true
+                    menuOpen = true
+                },
+                modifier = Modifier.onGloballyPositioned { btnCoords = it }.graphicsLayer { alpha = if (menuP.value > 0.001f) 0f else 1f }
+            )
+        }
+        if (menuP.value > 0.001f) MewMenuOverlay(vm, btnRect, menuP.value) { menuOpen = false }
     }
 }
 
@@ -165,7 +192,7 @@ fun PillNav(vm: MainViewModel, modifier: Modifier = Modifier) {
         modifier = modifier.enter(0)
     ) {
         Row(
-            Modifier.padding(8.dp).height(56.dp),
+            Modifier.padding(6.dp).height(52.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items.forEachIndexed { i, (label, on, off) ->
@@ -186,9 +213,9 @@ private fun PillItem(label: String, icon: ImageVector, selected: Boolean, badge:
     val fg by animateColorAsState(if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant, bounce(1f, 400f), label = "pillfg")
     val iconScale by animateFloatAsState(if (selected) 1.15f else 1f, bounce(0.4f, 500f), label = "pilliconscale")
     Row(
-        Modifier.fillMaxHeight().pressScale(src, 0.88f).clip(RoundedCornerShape(50)).background(bg)
+        Modifier.fillMaxHeight().pressScale(src, 0.88f).background(bg, RoundedCornerShape(50))
             .clickable(interactionSource = src, indication = null, onClick = onClick)
-            .padding(horizontal = 18.dp).animateContentSize(bounce(0.7f, 400f)),
+            .animateContentSize(bounce(0.7f, 400f)).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BadgedBox(badge = badge) {
@@ -354,17 +381,38 @@ fun DmsTab(vm: MainViewModel) {
 }
 
 @Composable
-fun LazyItemScope.PersonRow(avatar: String?, name: String, index: Int, status: String? = null, trailing: @Composable () -> Unit = {}, onClick: () -> Unit) {
+fun LazyItemScope.PersonRow(
+    avatar: String?, name: String, index: Int, status: String? = null, subtitle: String? = null, bold: Boolean = false,
+    trailing: @Composable () -> Unit = {}, onClick: () -> Unit
+) {
     val src = remember { MutableInteractionSource() }
+    val cs = MaterialTheme.colorScheme
     Surface(
         onClick = onClick, interactionSource = src, shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = cs.surfaceContainer,
         modifier = Modifier.animateItem().enter(index).pressScale(src).fillMaxWidth()
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AvatarImage(avatar, name, 48.dp, status = status)
             Spacer(Modifier.width(14.dp))
-            Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+                AnimatedContent(
+                    targetState = subtitle,
+                    transitionSpec = {
+                        (slideInVertically(bounce(0.8f, 500f)) { it / 2 } + fadeIn(bounce(1f, 500f))) togetherWith
+                            (slideOutVertically(bounce(0.8f, 500f)) { -it / 2 } + fadeOut(bounce(1f, 500f)))
+                    },
+                    label = "preview"
+                ) { sText ->
+                    if (sText != null) Text(
+                        sText, style = MaterialTheme.typography.bodySmall,
+                        color = if (bold) cs.onSurface else cs.onSurfaceVariant,
+                        fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
             trailing()
         }
     }
@@ -374,11 +422,16 @@ fun LazyItemScope.PersonRow(avatar: String?, name: String, index: Int, status: S
 fun DmList(vm: MainViewModel) {
     LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         itemsIndexed(vm.dms, key = { _, c -> c.id }) { i, c ->
-            PersonRow(c.icon, c.name, i, status = c.recipientId?.let { vm.presence[it] }, trailing = {
-                val un = UnreadStore.badge[c.id] ?: 0
-                if (un > 0) PopBadge { Text(un.toString()) }
-                if (c.type == 3) Icon(Icons.Filled.Groups, "Group", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }) { vm.openChannel(c) }
+            LaunchedEffect(c.id, vm.dmPreviews) { vm.requestPreview(c) }
+            val un = UnreadStore.badge[c.id] ?: 0
+            PersonRow(
+                c.icon, c.name, i, status = c.recipientId?.let { vm.presence[it] },
+                subtitle = if (vm.dmPreviews) vm.dmPreview[c.id]?.text else null, bold = un > 0,
+                trailing = {
+                    if (un > 0) PopBadge { Text(un.toString()) }
+                    if (c.type == 3) Icon(Icons.Filled.Groups, "Group", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            ) { vm.openChannel(c) }
         }
     }
 }
@@ -474,61 +527,6 @@ fun YouTab(vm: MainViewModel) {
                     }
                 }
             }
-        }
-
-        // appearance
-        SettingsCard {
-            SettingRow(Icons.Filled.Palette, "Theme")
-            Segmented(listOf("System", "Light", "Dark"), vm.themeMode) { vm.setTheme(it) }
-            Spacer(Modifier.height(6.dp))
-            if (Build.VERSION.SDK_INT >= 31) {
-                SettingRow(Icons.Filled.Brush, "Dynamic color", "Match your wallpaper") {
-                    Switch(vm.dynamic, { vm.setDynamic(it) })
-                }
-            }
-            SettingRow(Icons.Filled.ColorLens, "Accent color", if (dynActive) "Turn off dynamic color to use these" else null)
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                ACCENTS.forEachIndexed { i, (_, c) ->
-                    val sel = vm.accent == i && !dynActive
-                    val size by animateDpAsState(if (sel) 46.dp else 38.dp, bounce(0.5f, 400f), label = "accent")
-                    Box(
-                        Modifier.size(size).clip(CircleShape).background(Color(c).copy(alpha = if (dynActive) 0.35f else 1f))
-                            .clickable(enabled = !dynActive) { vm.setAccent(i) },
-                        contentAlignment = Alignment.Center
-                    ) { if (sel) Icon(Icons.Filled.Check, null, tint = Color.White) }
-                }
-            }
-        }
-
-        // chat
-        SettingsCard {
-            SettingRow(Icons.Filled.Face, "Status", if (vm.gwConnected) "Live connection active" else "Connecting...")
-            Segmented(listOf("Online", "Idle", "DND", "Hidden"), listOf("online", "idle", "dnd", "invisible").indexOf(vm.status).coerceAtLeast(0)) {
-                vm.setStatus(listOf("online", "idle", "dnd", "invisible")[it])
-            }
-            Spacer(Modifier.height(6.dp))
-            SettingRow(Icons.Filled.Info, "Server unread dots", "Small white dots for servers and channels with new messages") {
-                Switch(UnreadStore.serverDots, { UnreadStore.setServerDots(it) })
-            }
-            SettingRow(Icons.Filled.Notifications, "Notifications", "DMs and mentions (keeps a quiet status notification)") {
-                Switch(vm.notif, { on ->
-                    vm.setNotif(on)
-                    if (on && Build.VERSION.SDK_INT >= 33 &&
-                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                    ) permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                })
-            }
-            SettingRow(Icons.Filled.PlayCircle, "Autoplay GIF videos", "Tenor and Giphy style embeds") {
-                Switch(vm.autoplay, { vm.setAutoplay(it) })
-            }
-            SettingRow(Icons.Filled.Chat, "Group messages within")
-            Segmented(listOf("1 min", "5 min", "10 min"), listOf(1, 5, 10).indexOf(vm.groupMins).coerceAtLeast(0)) {
-                vm.setGroupMins(listOf(1, 5, 10)[it])
-            }
-            Spacer(Modifier.height(10.dp))
         }
 
         XTonalButton(

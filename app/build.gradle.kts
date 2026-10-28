@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.m3cord"
         minSdk = 26
         targetSdk = 35
-        versionCode = 431
-        versionName = "4.31"
+        versionCode = 500
+        versionName = "5.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

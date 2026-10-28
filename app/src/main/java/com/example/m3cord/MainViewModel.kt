@@ -19,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -134,6 +136,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (e.guildId == null) {
             val d = dms.find { it.id == e.channelId }
+            dmPreview[e.channelId] = previewOf(m, d?.type == 3)
             if (d != null) dms = listOf(d) + dms.filter { it.id != e.channelId } else loadDms()
         }
     }
@@ -182,6 +185,89 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { try { io { api!!.typing(ch.id) } } catch (e: Exception) { } }
     }
 
+    // ---- Mew settings ----
+    var dockAutoHide by mutableStateOf(prefs.getBoolean("dock_hide", true)); private set
+    @JvmName("applyDockAutoHide") fun setDockAutoHide(v: Boolean) { dockAutoHide = v; prefs.edit().putBoolean("dock_hide", v).apply() }
+    var reduceMotion by mutableStateOf(prefs.getBoolean("reduce", false)); private set
+    @JvmName("applyReduceMotion") fun setReduceMotion(v: Boolean) { reduceMotion = v; MotionPrefs.reduced = v; prefs.edit().putBoolean("reduce", v).apply() }
+    var dmPreviews by mutableStateOf(prefs.getBoolean("dm_preview", true)); private set
+    @JvmName("applyDmPreviews") fun setDmPreviews(v: Boolean) { dmPreviews = v; prefs.edit().putBoolean("dm_preview", v).apply() }
+
+    // ---- last message under each DM ----
+    val dmPreview = mutableStateMapOf<String, DmPreview>()
+    private val previewAsked = HashSet<String>()
+    private val previewLock = Mutex()
+
+    private fun previewOf(m: Msg, group: Boolean): DmPreview {
+        val raw = (api?.preview(m) ?: m.content)
+            .replace(Regex("<a?:(\\w+):\\d+>")) { ":" + it.groupValues[1] + ":" }
+            .replace(Regex("<@[!&]?\\d+>"), "@user").replace("\n", " ").take(110)
+        val mine = m.authorId == me?.id
+        return DmPreview(if (mine) "You: $raw" else if (group) m.author + ": " + raw else raw, mine)
+    }
+
+    /** Called by each visible DM row, fetches its latest message once, one at a time so we don't spam the API. */
+    fun requestPreview(ch: Channel) {
+        if (!dmPreviews || dmPreview.containsKey(ch.id) || !previewAsked.add(ch.id)) return
+        viewModelScope.launch {
+            previewLock.withLock {
+                try {
+                    val m = io { api?.lastMessage(ch.id) }
+                    if (m != null) dmPreview[ch.id] = previewOf(m, ch.type == 3)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    previewAsked.remove(ch.id)
+                }
+                delay(70)
+            }
+        }
+    }
+
+    // ---- real Discord account settings ----
+    var dset by mutableStateOf<Map<String, Any?>>(emptyMap()); private set
+    var dsetLoading by mutableStateOf(false); private set
+    var acct by mutableStateOf<Account?>(null); private set
+    var connections by mutableStateOf<List<InfoRow>?>(null); private set
+    var sessions by mutableStateOf<List<InfoRow>?>(null); private set
+    var apps by mutableStateOf<List<InfoRow>?>(null); private set
+
+    fun dB(k: String, d: Boolean = false): Boolean = (dset[k] as? Boolean) ?: d
+    fun dI(k: String, d: Int = 0): Int = (dset[k] as? Number)?.toInt() ?: d
+    fun dS(k: String, d: String = ""): String = (dset[k] as? String) ?: d
+    fun dFlag(k: String): Boolean = (dset["friend_source_flags"] as? JSONObject)?.optBoolean(k) ?: false
+
+    fun loadDiscordSettings() {
+        if (dset.isNotEmpty() || dsetLoading) return
+        dsetLoading = true
+        viewModelScope.launch {
+            try { dset = io { api!!.getSettings() } } catch (e: Exception) { error = "Couldn't load Discord settings (" + e.message + ")" }
+            dsetLoading = false
+        }
+    }
+
+    fun setD(key: String, value: Any) {
+        val before = dset
+        dset = dset + (key to value)
+        viewModelScope.launch {
+            try { io { api!!.patchSettings(JSONObject().put(key, value)) } } catch (e: Exception) {
+                dset = before
+                error = "Couldn't change that setting (" + e.message + ")"
+            }
+        }
+    }
+
+    fun setFriendFlag(k: String, v: Boolean) {
+        val cur = JSONObject((dset["friend_source_flags"] as? JSONObject)?.toString() ?: "{}")
+        cur.put(k, v)
+        setD("friend_source_flags", cur)
+    }
+
+    fun loadAccount() { if (acct == null) viewModelScope.launch { try { acct = io { api!!.account() } } catch (e: Exception) { error = "Couldn't load account info" } } }
+    fun loadConnections() { if (connections == null) viewModelScope.launch { connections = try { io { api!!.connections() } } catch (e: Exception) { emptyList() } } }
+    fun loadSessions() { if (sessions == null) viewModelScope.launch { sessions = try { io { api!!.sessions() } } catch (e: Exception) { emptyList() } } }
+    fun loadApps() { if (apps == null) viewModelScope.launch { apps = try { io { api!!.authorizedApps() } } catch (e: Exception) { emptyList() } } }
+
     var notif by mutableStateOf(prefs.getBoolean("notif", true)); private set
     @JvmName("applyNotif") fun setNotif(v: Boolean) {
         notif = v
@@ -213,6 +299,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         UnreadStore.init(app)
+        MotionPrefs.reduced = prefs.getBoolean("reduce", false)
         token?.let { api = DiscordApi(it); bootstrap() }
     }
 
@@ -634,6 +721,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         gwJob = null
         gwConnected = false
         UnreadStore.reset(); presence.clear(); typing.clear()
+        dmPreview.clear(); previewAsked.clear(); dset = emptyMap(); acct = null; connections = null; sessions = null; apps = null
         activities.clear(); appIcons.clear(); iconLoading.clear()
         emojiPacks = emptyList(); emojisRequested = false; emojiLoading = false
         favGifs = emptyList(); favReady = false; favLoading = false; favError = false

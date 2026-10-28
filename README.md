@@ -33,6 +33,14 @@ If a dependency version fails to resolve, bump it to the nearest available one. 
 Material3 must be 1.4.0 or newer (Expressive APIs).
 
 ## What's new
+- **v5.0, the Mew menu**: a new cat-paw button sits next to the nav pill. Tap it and a full-screen menu springs out of the button
+  with two tabs (`Mew.kt`):
+  - **Mew**: app settings. Theme, dynamic color, accent color, hide the pill while scrolling, **reduce motion** (swaps the bouncy
+    springs for short fades), last-message previews in Chats, message grouping (1 / 5 / 10 min), autoplay GIF videos,
+    server unread dots, your status, and notifications.
+  - **Discord**: your real Discord account settings, synced to every device. My Account (profile, log out), Appearance,
+    Accessibility, Text & Images, Privacy & Safety, Notifications, Language, Connections, Devices, Authorized Apps and Advanced.
+  - Chats now show the latest message under each DM name, and the nav pill is a little slimmer.
 - **New name and icon**: the app is now **M3w** (say it like a cat), with an adaptive icon of a very unimpressed face.
   The launcher label, login screen title and notification title all say M3w.
 - **Active now** (Friends tab): a carousel of friends who are playing / listening / streaming, using the same Material 3

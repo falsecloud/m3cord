@@ -19,7 +19,9 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -148,7 +150,8 @@ fun AppTheme(vm: MainViewModel, content: @Composable () -> Unit) {
 
 // ---------- shared helpers ----------
 
-fun <T> bounce(damping: Float = 0.7f, stiffness: Float = 400f) = spring<T>(damping, stiffness)
+fun <T> bounce(damping: Float = 0.7f, stiffness: Float = 400f): FiniteAnimationSpec<T> =
+    if (MotionPrefs.reduced) tween(140) else spring(damping, stiffness)
 
 fun Modifier.pressScale(src: InteractionSource, to: Float = 0.93f): Modifier = composed {
     val pressed by src.collectIsPressedAsState()
